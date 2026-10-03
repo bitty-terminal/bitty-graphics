@@ -1,0 +1,30 @@
+[package]
+name = "bitty-graphics"
+description = "Bounded graphics decode and raster mechanics for Bitty (candidate extension)"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bitty-terminal/bitty-graphics"
+keywords = ["terminal", "graphics", "bitty"]
+categories = ["multimedia"]
+publish = false
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+
+[dependencies]
+# Bounded Kitty PNG decode (relocated from Core `bitty-rich`, CTX-0247
+# lineage). std-only cannot do this: PNG needs DEFLATE decompression plus
+# unfiltering across five filter types, Adam7 deinterlacing, and
+# palette/tRNS/16-bit normalization. Hand-rolling that is an attack surface
+# of its own, so decoding delegates to the minimal `png` crate instead of
+# the full `image` facade (no format autodetect, no codecs beyond PNG, no
+# color-management stack). Carries the Core pin (`png 0.18`, already in the
+# Core lockfile via `arboard`); licenses (MIT/Apache-2.0) stay in the
+# `cargo-deny` allow list. No other codec edge moves: background JPEG/WebP
+# decode stays in Core (out of scope, `background.rs` untouched).
+png = "0.18"
