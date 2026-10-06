@@ -13,4 +13,4 @@ rust_version = "1.85"
 status = "landed"
 
 [contracts]
-status = "W-133 contract; CTX-0002/0003/0004 complete; Core W-141 parity verified"
+status = "W-133 accepted (specify c28681db, promotion 3479ce12); CTX-0002 accepted, CTX-0003 landed (ff350e9), CTX-0004 verified; Core W-141 parity (bitty 179c3b51)"
