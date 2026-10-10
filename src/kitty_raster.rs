@@ -80,6 +80,14 @@ pub struct KittyPlacedImage {
 /// The output is straight-alpha RGBA8, row-major, exactly
 /// `rect.width * rect.height * 4` bytes — the shape the present layer
 /// composites.
+///
+/// # Host-trait binding contract (graphics#14)
+///
+/// Frozen seam: signature, nearest-neighbor behavior, 64 MiB output cap,
+/// and fail-closed `None` contract are what a Core-owned trait binds to.
+/// Core's parallel copy spells this `rasterize_kitty` over Core-owned
+/// carriers with identical shapes; the trait binds this behavior under
+/// either name.
 #[must_use]
 pub fn rasterize(image: &KittyPlacedImage, rect: RectPx) -> Option<Vec<u8>> {
     rasterize_clipped(image, rect, rect)
@@ -102,6 +110,12 @@ pub fn rasterize(image: &KittyPlacedImage, rect: RectPx) -> Option<Vec<u8>> {
 ///
 /// The output is straight-alpha RGBA8, row-major, exactly
 /// `visible.width * visible.height * 4` bytes.
+///
+/// # Host-trait binding contract (graphics#14)
+///
+/// Frozen seam alongside [`rasterize`]: Core's parallel copy spells this
+/// `rasterize_kitty_clipped` over Core-owned carriers with identical
+/// shapes. Bit-identical to scaling into `full` and cropping `visible`.
 #[must_use]
 pub fn rasterize_clipped(
     image: &KittyPlacedImage,
@@ -203,6 +217,12 @@ pub const KITTY_RASTER_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
 /// [`KITTY_PRESENT_MAX_BYTES_PER_FRAME`], `false` otherwise (the caller skips
 /// that placement for this frame only). Skip-and-continue in paint order
 /// keeps small placements painting even when a huge one is shed.
+///
+/// # Host-trait binding contract (graphics#14)
+///
+/// Frozen seam: the 32-blit / 64 MiB caps and the admit-before-rasterize
+/// discipline are what a Core-owned trait binds to. Core holds no
+/// counterpart budget, so adopting this type is additive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KittyFrameBudget {
     blits: usize,
@@ -307,6 +327,12 @@ pub struct KittyRasterStats {
 /// placements simply stop being looked up (their entries age out under the
 /// caps and are never served, because lookups are driven by the live
 /// placement list).
+///
+/// # Host-trait binding contract (graphics#14)
+///
+/// Frozen seam: entry/byte caps, FIFO eviction, hit/miss accounting, and
+/// the never-cache-`None` rule are what a Core-owned trait binds to. Core
+/// holds no counterpart cache, so adopting this type is additive.
 #[derive(Debug, Clone, Default)]
 pub struct KittyRasterCache {
     entries: HashMap<KittyRasterKey, Vec<u8>>,

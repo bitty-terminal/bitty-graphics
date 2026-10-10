@@ -109,7 +109,10 @@ impl KittyTransmitFormat {
     /// Maps a wire `f=` value to a supported format.
     ///
     /// Returns `None` for every value outside `{100, 24, 32}`; callers must
-    /// reject rather than guess.
+    /// reject rather than guess. Host-trait note (graphics#14): unknown
+    /// `f` never reaches [`decode_kitty_payload`] through this seam; the
+    /// Core-owned trait must pin this `None`-means-reject spelling
+    /// (Core's parallel copy instead returns `MalformedPng`).
     #[must_use]
     pub const fn from_f(value: u32) -> Option<Self> {
         match value {
@@ -316,6 +319,17 @@ fn checked_dimensions(width: u32, height: u32) -> Result<u64, KittyDecodeError> 
 /// - [`KittyDecodeError::LengthMismatch`] when a raw payload is not exactly
 ///   `width * height * channels`.
 /// - [`KittyDecodeError::MalformedPng`] for truncated or corrupt PNG data.
+///
+/// # Host-trait binding contract (graphics#14)
+///
+/// Frozen seam: this signature, the caps
+/// ([`KITTY_DECODE_MAX_DIMENSION`], [`KITTY_DECODE_MAX_PIXELS`],
+/// [`KITTY_DECODE_MAX_BYTES`]), and the error mapping above are the
+/// contract a Core-owned trait binds to. Unknown wire `f` values never
+/// reach this function: map them through
+/// [`KittyTransmitFormat::from_f`] first (`None` means reject before
+/// calling; Core's parallel copy instead returns `MalformedPng`, so the
+/// trait must pin one spelling).
 pub fn decode_kitty_payload(
     format: KittyTransmitFormat,
     width: Option<u32>,
@@ -346,6 +360,13 @@ pub fn decode_kitty_payload(
 ///
 /// This avoids the ~64 MiB copy that `decode_kitty_payload` incurs on large
 /// raw RGBA streams.
+///
+/// # Host-trait binding contract (graphics#14)
+///
+/// Frozen seam alongside [`decode_kitty_payload`]: same caps, same error
+/// mapping, same unknown-`f` policy (map through
+/// [`KittyTransmitFormat::from_f`] before calling). Output is
+/// byte-identical to the borrowed entry point for the same input.
 pub fn decode_kitty_payload_owned(
     format: KittyTransmitFormat,
     width: Option<u32>,
