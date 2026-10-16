@@ -16,6 +16,10 @@ unsafe_code = "forbid"
 [lints.clippy]
 all = "warn"
 
+[[bin]]
+name = "bitty-graphics"
+path = "src/main.rs"
+
 [dependencies]
 # Bounded Kitty PNG decode (relocated from Core `bitty-rich`, CTX-0247
 # lineage). std-only cannot do this: PNG needs DEFLATE decompression plus

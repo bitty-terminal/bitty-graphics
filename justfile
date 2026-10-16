@@ -74,3 +74,16 @@ product:
     cargo fmt --all -- --check
     RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets
     cargo test --workspace --locked
+
+# Build the component binary for one target and pack the R2 tarball form
+# (CTX-0008 pilot): dist/<target>.tar.gz plus sidecar and SHA256SUMS.
+component-pack target out="dist":
+    ./scripts/pack-component.sh {{target}} {{out}}
+
+# Exercise target-specific archive member naming without cross-compiling.
+component-test:
+    ./scripts/test-component-dist.sh
+
+# Print the CDN URLs for this component version (pure mapping, no network).
+component-url target:
+    ./scripts/make-component-dist.sh --print-url --name graphics --version "$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)" --target {{target}}
