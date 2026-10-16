@@ -67,6 +67,7 @@ jobs:
           ./target/x86_64-unknown-linux-gnu/release/bitty-graphics --version
           VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
           test "$(./scripts/make-component-dist.sh --print-url --name graphics --version "$VERSION" --target x86_64-unknown-linux-gnu | head -n 1)" = "https://cdn.bitty.run/extensions/graphics/${VERSION}/x86_64-unknown-linux-gnu.tar.gz"
+          ./scripts/test-component-dist.sh
   actionlint:
     name: Lint GitHub Actions workflows
     runs-on: ubuntu-latest

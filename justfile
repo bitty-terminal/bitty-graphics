@@ -80,6 +80,10 @@ product:
 component-pack target out="dist":
     ./scripts/pack-component.sh {{target}} {{out}}
 
+# Exercise target-specific archive member naming without cross-compiling.
+component-test:
+    ./scripts/test-component-dist.sh
+
 # Print the CDN URLs for this component version (pure mapping, no network).
 component-url target:
     ./scripts/make-component-dist.sh --print-url --name graphics --version "$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)" --target {{target}}

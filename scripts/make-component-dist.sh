@@ -10,19 +10,21 @@
 # script uploads nothing.
 #
 # The tarball holds exactly two members at the archive root (no wrapper
-# directory): the executable `bitty-<name>` (mode 755) and
-# `bitty-component.toml`. The client extracts into the version directory it
-# creates (`<root>/<name>/<version>/`), so a wrapper dir would nest one
-# level too deep. Member order is fixed (descriptor first, then the
-# executable) so the archive layout is stable.
+# directory): the executable `bitty-<name>` (or `bitty-<name>.exe` for a
+# Windows target, mode 755) and `bitty-component.toml`. The client extracts
+# into the version directory it creates (`<root>/<name>/<version>/`), so a
+# wrapper dir would nest one level too deep. The descriptor keeps the logical
+# extensionless executable name; Core resolves the platform suffix when it
+# installs and launches the component. Member order is fixed (descriptor
+# first, then the executable) so the archive layout is stable.
 #
 # The source descriptor is validated against the installed parser rules
 # (`crates/bitty-runtime/src/component/descriptor.rs`): closed
 # `[component]` table, `name` matching `[a-z][a-z0-9-]{0,31}`, `version`
 # equal to `--version`, `protocol = [min, max]` with `1 <= min <= max`,
-# `executable` equal to `bitty-<name>`, and a required lowercase-hex
-# `sha256` that must match the binary. Anything else fails closed before
-# any output is written.
+# `executable` equal to `bitty-<name>` (the logical name, without a platform
+# suffix), and a required lowercase-hex `sha256` that must match the binary.
+# Anything else fails closed before any output is written.
 #
 # Pack version policy is intentionally narrower than the installed parser:
 # only the strict `X.Y.Z` core (no leading zeros, no prerelease or build
@@ -120,6 +122,15 @@ valid_version() {
 
 valid_target() {
   [[ "$1" =~ ^[a-z0-9_]+(-[a-z0-9_]+)+$ ]]
+}
+
+archive_executable() {
+  local target="$1"
+  local executable="$2"
+  case "$target" in
+  *-windows-*) printf '%s.exe\n' "$executable" ;;
+  *) printf '%s\n' "$executable" ;;
+  esac
 }
 
 # No-obfuscation gate (issue #1986): refuse minified text. Needs only awk:
@@ -317,6 +328,7 @@ fi
 [[ "$DESC_EXECUTABLE" == "$EXECUTABLE_PREFIX$DESC_NAME" ]] || die "source descriptor executable must be $EXECUTABLE_PREFIX$DESC_NAME, got: $DESC_EXECUTABLE"
 [[ -n "$DESC_SHA256" ]] || die "source descriptor is missing 'sha256'"
 [[ "$DESC_SHA256" =~ ^[0-9a-f]{64}$ ]] || die "source descriptor sha256 must be 64 lowercase hex characters"
+ARCHIVE_EXECUTABLE="$(archive_executable "$TARGET" "$DESC_EXECUTABLE")"
 
 BIN_SIZE="$(wc -c <"$BINARY" | tr -d ' ')"
 [[ "$BIN_SIZE" -gt 0 ]] || die "--binary is empty: $BINARY"
@@ -349,14 +361,14 @@ STAGE="$(mktemp -d "${TMPDIR:-/tmp}/bitty-component-dist.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 
 cp "$DESCRIPTOR_PATH" "$STAGE/$DESCRIPTOR_FILE"
-cp "$BINARY" "$STAGE/$DESC_EXECUTABLE"
-chmod 755 "$STAGE/$DESC_EXECUTABLE"
+cp "$BINARY" "$STAGE/$ARCHIVE_EXECUTABLE"
+chmod 755 "$STAGE/$ARCHIVE_EXECUTABLE"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "make-component-dist: dry-run payload:"
-  (cd "$STAGE" && ls -l "$DESCRIPTOR_FILE" "$DESC_EXECUTABLE")
+  (cd "$STAGE" && ls -l "$DESCRIPTOR_FILE" "$ARCHIVE_EXECUTABLE")
   echo "make-component-dist: dry-run would run:"
-  echo "  tar -czf $OUTPUT -C \$STAGE $DESCRIPTOR_FILE $DESC_EXECUTABLE"
+  echo "  tar -czf $OUTPUT -C \$STAGE $DESCRIPTOR_FILE $ARCHIVE_EXECUTABLE"
   echo "make-component-dist: dry-run PASS (name=$DESC_NAME, version=$VERSION, target=$TARGET)"
   exit 0
 fi
@@ -365,12 +377,12 @@ mkdir -p "$OUT_DIR"
 # tar refuses to compress over an existing archive in place, so start from
 # a clean path (same reason the bundle scripts rm -f first).
 rm -f "$OUTPUT"
-tar -czf "$OUTPUT" -C "$STAGE" "$DESCRIPTOR_FILE" "$DESC_EXECUTABLE"
+tar -czf "$OUTPUT" -C "$STAGE" "$DESCRIPTOR_FILE" "$ARCHIVE_EXECUTABLE"
 
 # The member list is fixed: assert the archive holds exactly the staged
 # payload at the archive root, so no absolute path, traversal, or stray
 # file can slip into a component release.
-EXPECTED="$(printf '%s\n%s\n' "$DESCRIPTOR_FILE" "$DESC_EXECUTABLE" | LC_ALL=C sort)"
+EXPECTED="$(printf '%s\n%s\n' "$DESCRIPTOR_FILE" "$ARCHIVE_EXECUTABLE" | LC_ALL=C sort)"
 ACTUAL="$(tar -tzf "$OUTPUT" | LC_ALL=C sort)"
 if [[ "$ACTUAL" != "$EXPECTED" ]]; then
   rm -f "$OUTPUT"
@@ -398,4 +410,4 @@ shopt -u nullglob
 (cd "$OUT_DIR" && $SHA256SUM "${TARBALLS[@]}" | LC_ALL=C sort -k2 >SHA256SUMS)
 (cd "$OUT_DIR" && $SHA256SUM -c SHA256SUMS >/dev/null) || die "fresh SHA256SUMS failed to verify"
 
-echo "make-component-dist: PASS (name=$DESC_NAME, version=$VERSION, target=$TARGET, output=$OUTPUT)"
+echo "make-component-dist: PASS (name=$DESC_NAME, version=$VERSION, target=$TARGET, executable=$ARCHIVE_EXECUTABLE, output=$OUTPUT)"

@@ -74,6 +74,11 @@ jobs:
             echo "::error::component name must be graphics, got: $DESC_NAME" >&2
             exit 1
           }
+          DESC_EXECUTABLE="$(sed -n 's/^executable = "\(.*\)"$/\1/p' bitty-component.toml | head -n 1)"
+          [[ "$DESC_EXECUTABLE" == "bitty-graphics" ]] || {
+            echo "::error::descriptor executable must be bitty-graphics, got: $DESC_EXECUTABLE" >&2
+            exit 1
+          }
           echo "release version OK: $VERSION"
 
   build:
@@ -147,6 +152,11 @@ jobs:
             echo "::error::tag version $VERSION does not match Cargo.toml $CARGO_VERSION" >&2
             exit 1
           }
+          DESC_EXECUTABLE="$(sed -n 's/^executable = "\(.*\)"$/\1/p' bitty-component.toml | head -n 1)"
+          [[ "$DESC_EXECUTABLE" == "bitty-graphics" ]] || {
+            echo "::error::descriptor executable must be bitty-graphics, got: $DESC_EXECUTABLE" >&2
+            exit 1
+          }
           ls -la dist
           (cd dist && sha256sum -- *.tar.gz | LC_ALL=C sort -k2 > SHA256SUMS)
           cat dist/SHA256SUMS
@@ -155,10 +165,15 @@ jobs:
           # verification, mirroring make-component-dist.sh).
           (cd dist && for f in *.tar.gz; do sha256sum "$f" >"$f.sha256"; done)
           # Member contract: every tarball holds exactly bitty-component.toml
-          # plus bitty-graphics at the archive root.
+          # plus the descriptor's logical executable, with .exe on Windows.
           for f in dist/*.tar.gz; do
             ACTUAL="$(tar -tzf "$f" | LC_ALL=C sort)"
-            EXPECTED="$(printf '%s\n%s\n' bitty-component.toml bitty-graphics)"
+            TARGET="$(basename "$f" .tar.gz)"
+            case "$TARGET" in
+              *-windows-*) EXECUTABLE="${DESC_EXECUTABLE}.exe" ;;
+              *) EXECUTABLE="$DESC_EXECUTABLE" ;;
+            esac
+            EXPECTED="$(printf '%s\n%s\n' bitty-component.toml "$EXECUTABLE" | LC_ALL=C sort)"
             [[ "$ACTUAL" == "$EXPECTED" ]] || {
               echo "::error::unexpected members in $f:" >&2
               echo "$ACTUAL" >&2
@@ -236,6 +251,24 @@ jobs:
               echo "verified ${NAME} ${ACTUAL}"
             fi
           done < dist/SHA256SUMS
+          for FILE in dist/*.tar.gz.sha256; do
+            NAME="$(basename "$FILE")"
+            TMP="$(mktemp)"
+            ERR="${TMP}.err"
+            if wrangler r2 object get "bitty/extensions/graphics/${VERSION}/${NAME}" --remote --pipe >"$TMP" 2>"$ERR"; then
+              if cmp -s "$FILE" "$TMP"; then
+                echo "verified ${NAME} (byte-identical)"
+              else
+                echo "::error::R2 content mismatch for ${NAME}"
+                FAIL=1
+              fi
+            else
+              echo "::error::failed to read back ${NAME} from R2" >&2
+              cat "$ERR" >&2 || true
+              FAIL=1
+            fi
+            rm -f "$TMP" "$ERR"
+          done
           # The manifest itself travels alongside the payload and must
           # round-trip byte-identical even though it is not listed in itself.
           if wrangler r2 object get "bitty/extensions/graphics/${VERSION}/SHA256SUMS" --remote --pipe | cmp - dist/SHA256SUMS; then

@@ -29,7 +29,7 @@ VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
 
 BIN="target/${TARGET}/release/bitty-graphics"
 case "$TARGET" in
-*-pc-windows-*) BIN="${BIN}.exe" ;;
+*-windows-*) BIN="${BIN}.exe" ;;
 esac
 
 echo "pack-component: building bitty-graphics $VERSION for $TARGET"
