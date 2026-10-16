@@ -1,0 +1,17 @@
+# bitty-component.toml — canonical component descriptor record for `graphics`
+# (CTX-0008 pilot). Owner decision 2026-10-16: component name `graphics`
+# (repo `bitty-graphics` strips the `bitty-` prefix, per the `net` precedent:
+# repo `bitty-network` ships component `net`, binary `bitty-net`).
+#
+# This file is the human-readable record of the FIXED descriptor fields
+# (name, version, protocol, executable). The `sha256` below is a placeholder:
+# every target binary has its own digest, so the pack step
+# (`scripts/pack-component.sh`) renders a per-target stage copy with the real
+# digest and refuses to pack when any other line drifts from this file.
+# Never publish this placeholder file itself as a release descriptor.
+[component]
+name = "graphics"
+version = "0.0.1"
+protocol = [1, 1]
+executable = "bitty-graphics"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"

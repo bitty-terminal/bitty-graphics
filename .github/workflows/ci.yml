@@ -42,6 +42,31 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets
       - run: cargo test --workspace --locked
+  component-dist:
+    name: Component pack wiring (no upload)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: 1.98.1
+          targets: x86_64-unknown-linux-gnu
+      - name: Pack host-target component tarball
+        run: |
+          set -euo pipefail
+          ./scripts/pack-component.sh x86_64-unknown-linux-gnu dist
+          ls -la dist
+      - name: Verify tarball members, manifest, and URLs
+        run: |
+          set -euo pipefail
+          test "$(tar -tzf dist/x86_64-unknown-linux-gnu.tar.gz | LC_ALL=C sort)" = "$(printf '%s\n%s\n' bitty-component.toml bitty-graphics)"
+          (cd dist && sha256sum -c SHA256SUMS)
+          ./target/x86_64-unknown-linux-gnu/release/bitty-graphics --version
+          VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          test "$(./scripts/make-component-dist.sh --print-url --name graphics --version "$VERSION" --target x86_64-unknown-linux-gnu | head -n 1)" = "https://cdn.bitty.run/extensions/graphics/${VERSION}/x86_64-unknown-linux-gnu.tar.gz"
   actionlint:
     name: Lint GitHub Actions workflows
     runs-on: ubuntu-latest
