@@ -101,7 +101,7 @@ valid_version "$descriptor_version" || die "descriptor version must be strict X.
 [[ -z "$VERSION" ]] || valid_version "$VERSION" || die "version must be strict X.Y.Z: $VERSION"
 [[ -z "$VERSION" ]] || [[ "$VERSION" == "$cargo_version" ]] || die "version $VERSION differs from Cargo.toml $cargo_version"
 [[ -z "$VERSION" ]] || [[ "$VERSION" == "$descriptor_version" ]] || die "version $VERSION differs from descriptor $descriptor_version"
-if [[ -n "${GITHUB_REF_NAME:-}" ]]; then
+if [[ "${GITHUB_REF_TYPE:-}" == "tag" && -n "${GITHUB_REF_NAME:-}" ]]; then
 	[[ "$GITHUB_REF_NAME" == "v$cargo_version" ]] || die "tag $GITHUB_REF_NAME does not match version $cargo_version"
 fi
 
