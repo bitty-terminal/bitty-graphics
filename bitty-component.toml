@@ -11,7 +11,7 @@
 # Never publish this placeholder file itself as a release descriptor.
 [component]
 name = "graphics"
-version = "0.0.1"
+version = "0.0.24"
 protocol = [1, 1]
 executable = "bitty-graphics"
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
