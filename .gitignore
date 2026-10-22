@@ -9,3 +9,6 @@ dist/
 coverage/
 site/
 .trash/
+
+# Python bytecode from the release tooling (scripts/component_release.py)
+__pycache__/

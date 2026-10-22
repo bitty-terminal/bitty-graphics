@@ -50,6 +50,9 @@ check:
     just metadata
     just hygiene
     just paths
+    just component-test
+    just component-release-check
+    just component-release-test
 
 workflows:
     actionlint
@@ -78,6 +81,14 @@ component-pack target out="dist":
 # Exercise target-specific archive member naming without cross-compiling.
 component-test:
     ./scripts/test-component-dist.sh
+
+# Gate: descriptor, supported release matrix, and declared target support.
+component-release-check:
+    ./scripts/component-release.sh check
+
+# Fixture tests for the release matrix, manifest, and catalog.v1 rows.
+component-release-test:
+    ./scripts/tests/component-release.test.sh
 
 # Print the CDN URLs for this component version (pure mapping, no network).
 component-url target:
