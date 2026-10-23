@@ -1,57 +1,40 @@
-//! `bitty-graphics` executable: component binary packed into the R2
-//! prebuilt distribution (`extensions/graphics/<version>/<target>.tar.gz`,
-//! CTX-0008 pilot).
+//! `bitty-graphics` executable component entry point.
 //!
-//! Pilot scope: reports `--version` and refuses anything else. The stdio
-//! serve loop lands with the Core-owned host binding (graphics#14
-//! follow-up); until then a bare invocation fails closed instead of
-//! pretending to serve the wire protocol.
+//! A bare invocation serves the v1 stdio decode protocol
+//! ([`bitty_graphics::component`]); `--version` reports the component version
+//! used by the descriptor and release tag. The binary carries no installer,
+//! reads no configuration, and never publishes itself.
 
 #![forbid(unsafe_code)]
 
 use std::process::ExitCode;
 
-/// Component version (tracks `Cargo.toml`; the release workflow refuses to
-/// publish when the tag disagrees with it).
-pub const COMPONENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+use bitty_graphics::component::server::{COMPONENT_VERSION, SERVER_EXIT_REFUSED, serve_stdio};
 
-/// Exit code for a refused invocation. Mirrors the `bitty-net`
-/// `EXIT_PROTOCOL` pattern: the operator asked for something this binary
-/// does not serve.
-pub const EXIT_REFUSED: u8 = 2;
+fn usage() {
+    eprintln!(
+        "usage: bitty-graphics [--version | --help]\n\
+         \n\
+         With no arguments, serves the graphics component protocol v1 on\n\
+         stdin/stdout. stderr carries diagnostics only."
+    );
+}
 
 fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);
     match (args.next(), args.next()) {
-        (None, _) => {
-            eprintln!(
-                "bitty-graphics: component serve loop is not yet wired (Core binding pending); refusing to serve"
-            );
-            ExitCode::from(EXIT_REFUSED)
-        }
+        (None, _) => ExitCode::from(serve_stdio()),
         (Some(flag), None) if flag == "--version" || flag == "-V" => {
             println!("bitty-graphics {COMPONENT_VERSION}");
             ExitCode::SUCCESS
         }
-        _ => {
-            eprintln!("usage: bitty-graphics [--version]");
-            ExitCode::from(EXIT_REFUSED)
+        (Some(flag), None) if flag == "--help" || flag == "-h" => {
+            usage();
+            ExitCode::SUCCESS
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{COMPONENT_VERSION, EXIT_REFUSED};
-
-    #[test]
-    fn version_tracks_package() {
-        assert_eq!(COMPONENT_VERSION, env!("CARGO_PKG_VERSION"));
-        assert!(!COMPONENT_VERSION.is_empty());
-    }
-
-    #[test]
-    fn refusal_code_is_nonzero() {
-        assert_ne!(EXIT_REFUSED, 0);
+        _ => {
+            usage();
+            ExitCode::from(SERVER_EXIT_REFUSED)
+        }
     }
 }

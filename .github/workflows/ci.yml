@@ -72,6 +72,16 @@ jobs:
           VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
           test "$(./scripts/make-component-dist.sh --print-url --name graphics --version "$VERSION" --target x86_64-unknown-linux-gnu | head -n 1)" = "https://cdn.bitty.run/extensions/graphics/${VERSION}/x86_64-unknown-linux-gnu.tar.gz"
           ./scripts/test-component-dist.sh
+      - name: Run the serve loop against the packed executable
+        env:
+          BITTY_GRAPHICS_COMPONENT_BIN: ${{ runner.temp }}/graphics-component/bitty-graphics
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/graphics-component"
+          tar -xzf dist/x86_64-unknown-linux-gnu.tar.gz -C "${RUNNER_TEMP}/graphics-component"
+          chmod 755 "${BITTY_GRAPHICS_COMPONENT_BIN}"
+          "${BITTY_GRAPHICS_COMPONENT_BIN}" --version
+          cargo test --locked --test serve_loop
   actionlint:
     name: Lint GitHub Actions workflows
     runs-on: ubuntu-latest
