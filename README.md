@@ -31,18 +31,18 @@ Framing is `length:u32be` followed by `payload[length]`; the payload starts with
 
 Advertised capability block (`HelloAck`, in order): request frame bytes, response frame bytes, payload bytes, max image dimension, max image pixels, max decoded bytes, max concurrent decodes, rate capacity, rate per second.
 
-| Bound                     | Value                     | Failure behavior                                     |
-| ------------------------- | ------------------------- | ---------------------------------------------------- |
-| Request frame payload     | 4 MiB + 1 KiB             | connection-level `Error`, exit 3                     |
-| Response frame payload    | 64 MiB + 1 KiB            | encoder refuses; the component never emits it        |
-| Image payload per request | 4 MiB (`IMG-1`)           | connection-level `Error`, exit 3                     |
-| Image side                | 8192 px                   | `budget`, connection stays open                      |
-| Image area                | 4096 x 4096 px (`IMG-2`)  | `budget`, connection stays open                      |
-| Decoded bitmap            | 64 MiB RGBA (`IMG-3`)     | `budget`, connection stays open                      |
-| Decode concurrency        | 1 (sequential loop)       | requests are pipelined, never decoded in parallel    |
-| Request deadline          | 1..=30,000 ms             | field refused; an elapsed deadline returns `timeout` |
-| Request rate              | 120 burst / 60 per second | `rate_limited`, 16 violations close the connection   |
-| Error message             | 256 bytes                 | decoder refuses                                      |
+| Bound                     | Value                     | Failure behavior                                               |
+| ------------------------- | ------------------------- | -------------------------------------------------------------- |
+| Request frame payload     | 4 MiB + 1 KiB             | connection-level `Error`, exit 3                               |
+| Response frame payload    | 64 MiB + 1 KiB            | encoder refuses; the component never emits it                  |
+| Image payload per request | 4 MiB (`IMG-1`)           | connection-level `Error`, exit 3                               |
+| Image side                | 8192 px                   | `budget`, connection stays open                                |
+| Image area                | 4096 x 4096 px (`IMG-2`)  | `budget`, connection stays open                                |
+| Decoded bitmap            | 64 MiB RGBA (`IMG-3`)     | `budget`, connection stays open                                |
+| Decode concurrency        | 1 (sequential loop)       | requests are pipelined, never decoded in parallel              |
+| Request deadline          | 1..=30,000 ms             | field refused; an elapsed deadline returns `timeout`           |
+| Request rate              | 120 burst / 60 per second | `rate_limited`, 16 consecutive violations close the connection |
+| Error message             | 256 bytes                 | decoder refuses                                                |
 
 Typed error kinds: `denied` (safe mode or withheld capability), `invalid_request`, `budget`, `unsupported` (transmit format), `protocol` (framing/handshake), `timeout`, `internal`, `rate_limited`, `malformed_image`. A malformed image, over-cap dimensions, or length mismatch is a per-request error: the connection stays open and the next request is served. Framing, handshake, and message-schema violations are connection-level errors that exit 3. A declared output budget above the component ceiling is clamped down to it; a decoded bitmap larger than the effective budget is refused with `budget`.
 
