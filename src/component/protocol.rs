@@ -1559,6 +1559,42 @@ mod tests {
     }
 
     #[test]
+    fn arbitrary_bytes_never_panic_the_codec() {
+        // Deterministic pseudo-random payloads: every decode must return a
+        // typed error or a message, never panic. This exercises the schema
+        // decoder and every bounded field reader on hostile shapes.
+        let mut state = 0x9E37_79B9_u32;
+        for round in 0..512_usize {
+            let len = round % 96;
+            let mut payload = vec![0_u8; len];
+            for slot in &mut payload {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                *slot = (state >> 24) as u8;
+            }
+            // Force the first byte through every tag space on some rounds.
+            if round % 8 == 0 && !payload.is_empty() {
+                payload[0] = (round % 256) as u8;
+            }
+            let _ = decode_message(&payload);
+        }
+    }
+
+    #[test]
+    fn arbitrary_streams_never_panic_the_frame_reader() {
+        let mut state = 0x1234_5678_u32;
+        for round in 0..128_usize {
+            let len = round % 48;
+            let mut bytes = vec![0_u8; len];
+            for slot in &mut bytes {
+                state = state.wrapping_mul(22_695_477).wrapping_add(1);
+                *slot = (state >> 24) as u8;
+            }
+            let mut reader = FrameReader::new(bytes.as_slice());
+            while let Ok(Some(_)) = reader.read_frame() {}
+        }
+    }
+
+    #[test]
     fn wire_error_display_is_stable() {
         assert_eq!(
             WireError::TooLarge { len: 9, limit: 4 }.to_string(),
