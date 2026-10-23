@@ -295,7 +295,8 @@ impl Session {
             return outcome;
         }
 
-        if self.consumes_rate(&message) && !self.rate.allow(now) {
+        let consumes_rate = self.consumes_rate(&message);
+        if consumes_rate && !self.rate.allow(now) {
             self.rate_violations = self.rate_violations.saturating_add(1);
             outcome.replies.push(Message::Error {
                 request: message.request_id().unwrap_or(CONNECTION_ID),
@@ -307,6 +308,11 @@ impl Session {
                 self.phase = Phase::Closed;
             }
             return outcome;
+        }
+        if consumes_rate {
+            // The close threshold counts consecutive violations, so any
+            // admitted request clears the streak.
+            self.rate_violations = 0;
         }
         let request_id = message.request_id().unwrap_or(CONNECTION_ID);
 
@@ -916,6 +922,37 @@ mod tests {
         }
         assert_eq!(refused, RATE_MAX_VIOLATIONS);
         assert_eq!(close, Some(SERVER_EXIT_PROTOCOL));
+    }
+
+    #[test]
+    fn admitted_request_clears_the_violation_streak() {
+        let mut session = Session::new();
+        handshake(&mut session);
+        let fixed = now();
+        for _ in 0..RATE_CAPACITY {
+            assert_eq!(session.handle(png_request(1), fixed).close, None);
+        }
+        for _ in 0..RATE_MAX_VIOLATIONS - 1 {
+            let outcome = session.handle(png_request(1), fixed);
+            assert!(matches!(
+                outcome.replies.as_slice(),
+                [Message::Error {
+                    kind: ErrorKind::RateLimited,
+                    ..
+                }]
+            ));
+            assert_eq!(outcome.close, None);
+        }
+        assert_eq!(session.rate_violations, RATE_MAX_VIOLATIONS - 1);
+        // One second later the gate refills, the request is admitted, and the
+        // streak resets instead of accumulating toward a later disconnect.
+        let later = fixed + Duration::from_secs(1);
+        let outcome = session.handle(png_request(1), later);
+        assert!(matches!(
+            outcome.replies.as_slice(),
+            [Message::DecodeResponse { .. }]
+        ));
+        assert_eq!(session.rate_violations, 0);
     }
 
     #[test]
