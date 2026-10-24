@@ -24,6 +24,25 @@ fail() {
 	exit 1
 }
 
+# sha256 <file>... — GNU sha256sum when present, otherwise the BSD-compatible
+# shasum shipped with macOS. Mirrors the fallback in scripts/package-component.sh.
+sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$@"
+	else
+		shasum -a 256 "$@"
+	fi
+}
+
+# sed_inplace <expr> <file> — BSD sed requires an explicit -i suffix, GNU sed
+# does not, so edit through a temporary file instead.
+sed_inplace() {
+	local expr="$1"
+	local file="$2"
+	sed "$expr" "$file" >"$file.tmp"
+	command mv "$file.tmp" "$file"
+}
+
 expect_failure() {
 	local name="$1"
 	shift
@@ -99,7 +118,7 @@ make_tarball() {
 	printf '#!/bin/sh\necho demo 1.2.3\n' >"$stage/$executable"
 	chmod 755 "$stage/$executable"
 	local digest
-	digest="$(sha256sum "$stage/$executable" | cut -d' ' -f1)"
+	digest="$(sha256 "$stage/$executable" | cut -d' ' -f1)"
 	sed "s/^sha256 = \".*\"$/sha256 = \"$digest\"/" "$repo/bitty-component.toml" >"$stage/bitty-component.toml"
 	if [[ "$extra" -eq 1 ]]; then
 		printf 'stray\n' >"$stage/README.md"
@@ -167,7 +186,7 @@ EOF
 expect_failure "target the Core installer never requests" "$SCRIPT" check --root "$repo"
 
 repo="$(new_repo no-runner)"
-sed -i '/^runner = "ubuntu-24.04"$/d' "$repo/component-targets.toml"
+sed_inplace '/^runner = "ubuntu-24.04"$/d' "$repo/component-targets.toml"
 expect_failure "supported target without a runner" "$SCRIPT" check --root "$repo"
 
 repo="$(new_repo no-reason)"
@@ -196,15 +215,42 @@ EOF
 expect_failure "unsupported target declaring a runner" "$SCRIPT" check --root "$repo"
 
 repo="$(new_repo os-arch-mismatch)"
-sed -i 's/^os = "linux"$/os = "macos"/' "$repo/component-targets.toml"
+sed_inplace 's/^os = "linux"$/os = "macos"/' "$repo/component-targets.toml"
 expect_failure "os/arch mismatch for a known triple" "$SCRIPT" check --root "$repo"
 
 repo="$(new_repo version-drift)"
-sed -i 's/^version = "1\.2\.3"$/version = "1.2.4"/' "$repo/Cargo.toml"
+sed_inplace 's/^version = "1\.2\.3"$/version = "1.2.4"/' "$repo/Cargo.toml"
 expect_failure "Cargo/descriptor version drift" "$SCRIPT" check --root "$repo"
 
+# --- 3b. Cargo version inherited from [workspace.package] ---
+# `version.workspace = true` is a TOML table, not a string: the resolver must
+# fall through to [workspace.package].version instead of rejecting it.
+repo="$(new_repo inherited-version)"
+cat >"$repo/Cargo.toml" <<'EOF'
+[package]
+name = "demo"
+version.workspace = true
+
+[workspace.package]
+version = "1.2.3"
+EOF
+"$SCRIPT" check --root "$repo" >/dev/null ||
+	fail "workspace-inherited Cargo version failed check"
+pass "workspace-inherited Cargo version resolves through [workspace.package]"
+
+repo="$(new_repo inherited-drift)"
+cat >"$repo/Cargo.toml" <<'EOF'
+[package]
+name = "demo"
+version.workspace = true
+
+[workspace.package]
+version = "9.9.9"
+EOF
+expect_failure "workspace-inherited Cargo version drift" "$SCRIPT" check --root "$repo"
+
 repo="$(new_repo executable-drift)"
-sed -i 's/^executable = "bitty-demo"$/executable = "bitty-other"/' "$repo/bitty-component.toml"
+sed_inplace 's/^executable = "bitty-demo"$/executable = "bitty-other"/' "$repo/bitty-component.toml"
 expect_failure "descriptor executable mismatch" "$SCRIPT" check --root "$repo"
 
 repo="$(new_repo missing-matrix)"
@@ -229,15 +275,35 @@ grep -Eq '^[0-9a-f]{64}  x86_64-unknown-linux-gnu\.tar\.gz$' "$dist/SHA256SUMS" 
 	fail "SHA256SUMS is missing the Linux target"
 grep -Eq '^[0-9a-f]{64}  x86_64-pc-windows-msvc\.tar\.gz$' "$dist/SHA256SUMS" ||
 	fail "SHA256SUMS is missing the Windows target"
-(cd "$dist" && sha256sum -c SHA256SUMS >/dev/null) || fail "SHA256SUMS does not verify"
+(cd "$dist" && sha256 -c SHA256SUMS >/dev/null) || fail "SHA256SUMS does not verify"
 pass "SHA256SUMS covers every packaged target and verifies"
+
+# --- 4a. GNU binary-mode markers are not canonical checksum lines ---
+# Git-Bash/MSYS sha256sum writes "<hex> *<name>". The packer normalizes that
+# marker (see 4b); the verifier must reject it, so a platform-specific line
+# can never be read as release proof.
+binary_marker="$TMP_BASE/binary-marker"
+mkdir -p "$binary_marker"
+cp "$dist"/*.tar.gz "$dist"/*.sha256 "$dist/SHA256SUMS" "$binary_marker/"
+sed 's/^\([0-9a-f]\{64\}\)  /\1 */' "$dist/SHA256SUMS" >"$binary_marker/SHA256SUMS"
+expect_failure "SHA256SUMS with GNU binary-mode markers" \
+	"$SCRIPT" catalog --root "$repo" --dist "$binary_marker"
+
+marker_sidecar="$TMP_BASE/marker-sidecar"
+mkdir -p "$marker_sidecar"
+cp "$dist"/*.tar.gz "$dist"/*.sha256 "$dist/SHA256SUMS" "$marker_sidecar/"
+sed 's/^\([0-9a-f]\{64\}\)  /\1 */' \
+	"$dist/x86_64-unknown-linux-gnu.tar.gz.sha256" \
+	>"$marker_sidecar/x86_64-unknown-linux-gnu.tar.gz.sha256"
+expect_failure "sidecar with a GNU binary-mode marker" \
+	"$SCRIPT" catalog --root "$repo" --dist "$marker_sidecar"
 
 "$SCRIPT" catalog --root "$repo" --dist "$dist" --output "$catalog_dir/catalog.v1" >/dev/null ||
 	fail "catalog generation failed"
 row() {
 	local target="$1"
 	local digest
-	digest="$(cd "$dist" && sha256sum "$target.tar.gz" | cut -d' ' -f1)"
+	digest="$(cd "$dist" && sha256 "$target.tar.gz" | cut -d' ' -f1)"
 	printf 'extension demo 1.2.3 %s %s\n' "$target" "$digest"
 }
 expected_catalog="schema 1
@@ -249,6 +315,54 @@ pass "catalog rows are keyed by target and match SHA256SUMS"
 
 "$SCRIPT" verify --root "$repo" --dist "$dist" >/dev/null || fail "full-matrix verify failed"
 pass "full-matrix verify accepts the complete supported set"
+
+# --- 4b. the packer normalizes Git-Bash/MSYS binary-mode checksum output ---
+# Git-Bash/MSYS sha256sum defaults to binary mode and prints "<hex> *<name>".
+# Shadow sha256sum with a shim that reproduces that marker, then require the
+# writer to emit canonical "<hex>  <name>" lines for the sidecar and the
+# aggregate manifest, and the verifier to accept the result.
+msys_shim="$TMP_BASE/msys-shim"
+mkdir -p "$msys_shim"
+cat >"$msys_shim/sha256sum" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if command -p sha256sum >/dev/null 2>&1; then
+	digest="$(command -p sha256sum "$@" | cut -d' ' -f1)"
+else
+	digest="$(command -p shasum -a 256 "$@" | cut -d' ' -f1)"
+fi
+printf '%s *%s\n' "$digest" "$(basename "${@: -1}")"
+EOF
+chmod 755 "$msys_shim/sha256sum"
+
+writer_repo="$(new_repo writer-repo)"
+writer_dist="$TMP_BASE/writer-dist"
+writer_stage="$TMP_BASE/writer-stage"
+mkdir -p "$writer_dist" "$writer_stage"
+printf '#!/bin/sh\necho demo 1.2.3\n' >"$writer_stage/bitty-demo"
+chmod 755 "$writer_stage/bitty-demo"
+digest="$(sha256 "$writer_stage/bitty-demo" | cut -d' ' -f1)"
+cat >"$writer_stage/bitty-component.toml" <<EOF
+[component]
+name = "demo"
+version = "1.2.3"
+protocol = [1, 1]
+executable = "bitty-demo"
+sha256 = "$digest"
+EOF
+PATH="$msys_shim:$PATH" "$ROOT/scripts/make-component-dist.sh" \
+	--source "$writer_stage" --version 1.2.3 --target x86_64-unknown-linux-gnu \
+	--binary "$writer_stage/bitty-demo" \
+	--output "$writer_dist/x86_64-unknown-linux-gnu.tar.gz" >/dev/null ||
+	fail "make-component-dist rejected MSYS-style sha256sum output"
+grep -Eq '^[0-9a-f]{64}  x86_64-unknown-linux-gnu\.tar\.gz$' "$writer_dist/SHA256SUMS" ||
+	fail "SHA256SUMS kept a binary-mode marker: $(cat "$writer_dist/SHA256SUMS")"
+grep -Eq '^[0-9a-f]{64}  x86_64-unknown-linux-gnu\.tar\.gz$' \
+	"$writer_dist/x86_64-unknown-linux-gnu.tar.gz.sha256" ||
+	fail "sidecar kept a binary-mode marker: $(cat "$writer_dist/x86_64-unknown-linux-gnu.tar.gz.sha256")"
+"$SCRIPT" catalog --root "$writer_repo" --dist "$writer_dist" >/dev/null ||
+	fail "catalog rejected the writer's canonical checksum lines"
+pass "make-component-dist normalizes binary-mode checksum markers"
 
 # --- 5. unsupported or unverified bytes never reach the catalog ---
 partial="$TMP_BASE/partial"
@@ -298,7 +412,7 @@ stage="$TMP_BASE/stale-stage"
 mkdir -p "$stale_descriptor" "$stage"
 printf '#!/bin/sh\nexit 0\n' >"$stage/bitty-demo"
 chmod 755 "$stage/bitty-demo"
-digest="$(sha256sum "$stage/bitty-demo" | cut -d' ' -f1)"
+digest="$(sha256 "$stage/bitty-demo" | cut -d' ' -f1)"
 cat >"$stage/bitty-component.toml" <<EOF
 [component]
 name = "demo"

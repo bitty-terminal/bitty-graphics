@@ -235,6 +235,20 @@ else
   SHA256SUM="shasum -a 256"
 fi
 
+# Print one canonical checksum line, "<hex>  <name>" (two spaces, no mode
+# marker): the form scripts/component_release.py verifies byte-exactly.
+# Git-Bash/MSYS sha256sum defaults to binary mode and emits "<hex> *<name>",
+# so normalize the marker here instead of trusting the platform default. The
+# digest itself stays the default (binary) computation, so the bytes hashed
+# are identical on every platform.
+sha256_line() {
+  local file="$1"
+  local digest
+  digest="$($SHA256SUM "$file" | cut -d' ' -f1)"
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "no SHA-256 digest for $file"
+  printf '%s  %s\n' "$digest" "$(basename "$file")"
+}
+
 # A relative --output is anchored before staging (the publisher passes
 # dist/<target>.tar.gz from the repository root).
 if [[ "$OUTPUT" != /* ]]; then
@@ -390,9 +404,9 @@ if [[ "$ACTUAL" != "$EXPECTED" ]]; then
 $ACTUAL"
 fi
 
-# Per-artifact sidecar (one line, GNU sha256sum format) for single-file
-# verification, mirroring the release <.sha256> sidecars.
-(cd "$OUT_DIR" && $SHA256SUM "$(basename "$OUTPUT")" >"$(basename "$OUTPUT").sha256")
+# Per-artifact sidecar (one line, canonical GNU text-mode format) for
+# single-file verification, mirroring the release <.sha256> sidecars.
+(cd "$OUT_DIR" && sha256_line "$(basename "$OUTPUT")" >"$(basename "$OUTPUT").sha256")
 
 # Aggregate manifest over every target tarball in the output dir (the file
 # the publisher uploads as extensions/<name>/<version>/SHA256SUMS).
@@ -407,7 +421,19 @@ for candidate in "$OUT_DIR"/*.tar.gz; do
 done
 shopt -u nullglob
 [[ "${#TARBALLS[@]}" -gt 0 ]] || die "no target tarballs in $OUT_DIR"
-(cd "$OUT_DIR" && $SHA256SUM "${TARBALLS[@]}" | LC_ALL=C sort -k2 >SHA256SUMS)
-(cd "$OUT_DIR" && $SHA256SUM -c SHA256SUMS >/dev/null) || die "fresh SHA256SUMS failed to verify"
+(
+  cd "$OUT_DIR"
+  for tarball in "${TARBALLS[@]}"; do
+    sha256_line "$tarball"
+  done | LC_ALL=C sort -k2 >SHA256SUMS
+)
+# Verify by recomputing each digest in the tool's default (binary on MSYS)
+# mode. Check mode would honor the canonical text marker we just wrote and
+# read the tarball in text mode on MSYS, silently changing the digest of
+# CRLF-bearing bytes.
+while read -r digest name; do
+  actual="$($SHA256SUM "$OUT_DIR/$name" | cut -d' ' -f1)"
+  [[ "$actual" == "$digest" ]] || die "fresh SHA256SUMS failed to verify for $name"
+done <"$OUT_DIR/SHA256SUMS"
 
 echo "make-component-dist: PASS (name=$DESC_NAME, version=$VERSION, target=$TARGET, executable=$ARCHIVE_EXECUTABLE, output=$OUTPUT)"

@@ -202,8 +202,14 @@ def cargo_version(root: Path) -> str:
     path = root / "Cargo.toml"
     data = read_toml(path, "Cargo.toml")
     package = data.get("package")
-    if isinstance(package, dict) and "version" in package:
-        return strict_version(package["version"], "Cargo.toml [package] version")
+    if isinstance(package, dict):
+        version = package.get("version")
+        # `version.workspace = true` inherits [workspace.package].version;
+        # let the workspace lookup below resolve it instead of handing the
+        # TOML table to strict_version.
+        inherited = isinstance(version, dict) and version.get("workspace") is True
+        if version is not None and not inherited:
+            return strict_version(version, "Cargo.toml [package] version")
     workspace = data.get("workspace")
     if isinstance(workspace, dict):
         workspace_package = workspace.get("package")
