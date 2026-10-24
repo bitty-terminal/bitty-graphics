@@ -128,6 +128,20 @@ jobs:
             echo "unexpected --version output: $output" >&2
             exit 1
           }
+      - name: Run the serve loop against the packed executable
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/graphics-component"
+          mkdir -p "$stage"
+          tar -xzf "dist/$TARGET.tar.gz" -C "$stage"
+          binary="$stage/bitty-graphics"
+          chmod 755 "$binary"
+          "$binary" --version
+          BITTY_GRAPHICS_COMPONENT_BIN="$binary" cargo test --locked --test serve_loop
       - name: Emit the catalog row for this target
         env:
           TARGET: ${{ matrix.target }}

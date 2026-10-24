@@ -130,6 +130,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod component;
 pub mod geometry;
 pub mod kitty_decode;
 pub mod kitty_raster;
