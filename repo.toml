@@ -2,7 +2,7 @@
 name = "bitty-graphics"
 kind = "extension"
 lang = "rust"
-role = "bounded graphics decode extension; landed crate, independently verified"
+role = "bounded graphics decode extension; landed crate, independently verified; stdio v1 decode component"
 owner = "bitty-core"
 docs = "bitty-terminal-docs"
 
@@ -13,4 +13,4 @@ rust_version = "1.85"
 status = "landed"
 
 [contracts]
-status = "W-133 accepted (specify c28681db, promotion 3479ce12); CTX-0002 accepted, CTX-0003 landed (ff350e9), CTX-0004 verified; Core W-141 parity (bitty 179c3b51)"
+status = "W-133 accepted (specify c28681db, promotion 3479ce12); CTX-0002 accepted, CTX-0003 landed (ff350e9), CTX-0004 verified; Core W-141 parity (bitty 179c3b51); stdio decode protocol v1 implemented (component 0.0.25), Core host binding remains follow-up #2163"
