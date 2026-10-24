@@ -1,10 +1,7 @@
 # Component Release Matrix
 
-Status: **in progress** for the `graphics` component (issue
-`bitty-terminal/bitty#2491`, milestone 0.0.27). The target matrix, packaging,
-and verification tooling exist, but the Windows packaging leg has not produced
-a green CI run yet, so this page does not claim per-target proof for
-`x86_64-pc-windows-msvc`.
+Status: **implemented** for the `graphics` component (issue
+`bitty-terminal/bitty#2491`, milestone 0.0.27).
 
 This page is the release contract for the native `graphics` component. The
 machine-readable source of truth is `component-targets.toml`; this document
@@ -25,19 +22,18 @@ an explicit "not installable yet", never a silent fallback to another target.
 
 ## Supported targets
 
-| Target triple               | OS      | Arch    | Native CI runner   | Evidence                                         |
-| --------------------------- | ------- | ------- | ------------------ | ------------------------------------------------ |
-| `x86_64-unknown-linux-gnu`  | linux   | x86_64  | `ubuntu-24.04`     | check, test, clippy, run, pack, catalog row      |
-| `aarch64-unknown-linux-gnu` | linux   | aarch64 | `ubuntu-24.04-arm` | check, test, clippy, run, pack, catalog row      |
-| `aarch64-apple-darwin`      | macos   | aarch64 | `macos-15`         | check, test, clippy, run, pack, catalog row      |
-| `x86_64-apple-darwin`       | macos   | x86_64  | `macos-15-intel`   | check, test, clippy, run, pack, catalog row      |
-| `x86_64-pc-windows-msvc`    | windows | x86_64  | `windows-2025`     | check, test, clippy (pack/catalog row not green) |
+| Target triple               | OS      | Arch    | Native CI runner   | Evidence                                    |
+| --------------------------- | ------- | ------- | ------------------ | ------------------------------------------- |
+| `x86_64-unknown-linux-gnu`  | linux   | x86_64  | `ubuntu-24.04`     | check, test, clippy, run, pack, catalog row |
+| `aarch64-unknown-linux-gnu` | linux   | aarch64 | `ubuntu-24.04-arm` | check, test, clippy, run, pack, catalog row |
+| `aarch64-apple-darwin`      | macos   | aarch64 | `macos-15`         | check, test, clippy, run, pack, catalog row |
+| `x86_64-apple-darwin`       | macos   | x86_64  | `macos-15-intel`   | check, test, clippy, run, pack, catalog row |
+| `x86_64-pc-windows-msvc`    | windows | x86_64  | `windows-2025`     | check, test, clippy, run, pack, catalog row |
 
-Four rows have green PR CI evidence on their native GitHub-hosted runner:
+Every row has green PR CI evidence on its native GitHub-hosted runner:
 `cargo check` and `cargo test` prove compilation and behavior, clippy denies
 warnings on that platform, the tarball is packed, and the packaged binary is
-executed (`--version`) before its catalog row is emitted. The Windows row
-still fails at packaging, so it has no pack or catalog-row evidence yet.
+executed (`--version`) before its catalog row is emitted.
 
 ## Documented exclusions
 
@@ -92,7 +88,7 @@ the pinned-version fallback described in the Core packaging contract.
 - `component` runs once per supported target on its native runner: `cargo
 check --workspace --all-targets`, `cargo test --workspace`, clippy with
   `-D warnings`, packaging, native `--version` execution, and the per-target
-  catalog row. This job currently fails on the Windows target at packaging.
+  catalog row.
 - `component-aggregate` merges the target artifacts, regenerates
   `SHA256SUMS`, runs the full-matrix verifier (all supported targets present,
   every archive member and digest checked), and prints the catalog fragment.
@@ -149,8 +145,5 @@ name comes from `bitty-component.toml`, the version from that descriptor plus
 - `x86_64-unknown-linux-musl`: needs a static musl build plus a native Alpine
   test leg.
 - `aarch64-pc-windows-msvc`: needs a Windows arm64 native runner and ABI proof.
-- `x86_64-pc-windows-msvc`: the packaging leg must go green (pack tarball,
-  execute the binary, emit the catalog row) before this page claims that row
-  as proven.
 - The `extensions/catalog.v1` merge job (multi-component) remains a follow-up;
   this repository only proves its own row fragment.
