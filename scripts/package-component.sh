@@ -144,7 +144,26 @@ expected_members="$(printf '%s\n%s\n' "$DESCRIPTOR_FILE" "$archive_executable" |
 actual_members="$(tar -tzf "$archive" | LC_ALL=C sort)"
 [[ "$actual_members" == "$expected_members" ]] || die "archive members are not exactly descriptor plus executable"
 
-(cd -- "$output_dir" && sha256sum -c SHA256SUMS >/dev/null) || die "SHA256SUMS verification failed"
+if command -v sha256sum >/dev/null 2>&1; then
+	sha256_tool=(sha256sum)
+else
+	sha256_tool=(shasum -a 256)
+fi
+# GNU sha256sum emits "<hex>  <name>" in text mode but "<hex> *<name>" in
+# binary mode, and Git-Bash/MSYS defaults to binary mode. Read the digest and
+# name ourselves, stripping the optional binary marker, instead of relying on
+# `sha256sum -c`: check mode honors that marker, and MSYS text mode would
+# translate CRLF bytes inside the tarball and corrupt the comparison.
+while read -r digest name; do
+	[[ -n "$digest" && -n "$name" ]] || die "SHA256SUMS contains an empty entry"
+	[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "SHA256SUMS contains a malformed digest: $digest"
+	name="${name#\*}"
+	if [[ "$name" == */* ]]; then
+		die "SHA256SUMS entry is not a plain filename: $name"
+	fi
+	actual="$("${sha256_tool[@]}" "$output_dir/$name" | cut -d' ' -f1)"
+	[[ "$actual" == "$digest" ]] || die "SHA256SUMS verification failed for $name"
+done <"$output_dir/SHA256SUMS"
 
 printf 'package-component: PASS (name=%s, target=%s, version=%s, output=%s)\n' \
 	"$COMPONENT_NAME" "$TARGET" "$cargo_version" "$archive"
