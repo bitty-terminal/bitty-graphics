@@ -897,6 +897,51 @@ mod tests {
     }
 
     #[test]
+    fn over_deadline_request_times_out_without_bitmap() {
+        let mut session = Session::new();
+        handshake(&mut session);
+        // The clock is injected, so a backdated start makes the elapsed time
+        // deterministic without waiting: the decode itself is instant.
+        let started = now() - Duration::from_secs(2);
+        let outcome = session.handle(
+            Message::DecodeRequest {
+                request: 7,
+                format: 100,
+                width: None,
+                height: None,
+                budget_bytes: 4096,
+                deadline_ms: 1_000,
+                payload: PNG_1X1_RGBA_RED.to_vec(),
+            },
+            started,
+        );
+        assert_eq!(outcome.close, None);
+        assert!(matches!(
+            outcome.replies.as_slice(),
+            [Message::Error {
+                request: 7,
+                kind: ErrorKind::Timeout,
+                ..
+            }]
+        ));
+        assert!(
+            !outcome
+                .replies
+                .iter()
+                .any(|reply| matches!(reply, Message::DecodeResponse { .. })),
+            "over-deadline request must not yield a bitmap: {:?}",
+            outcome.replies
+        );
+        // The refusal is per-request: the connection still serves later work.
+        let outcome = session.handle(png_request(8), now());
+        assert_eq!(outcome.close, None);
+        assert!(matches!(
+            outcome.replies.as_slice(),
+            [Message::DecodeResponse { request: 8, .. }]
+        ));
+    }
+
+    #[test]
     fn rate_gate_sheds_burst_then_closes() {
         let mut session = Session::new();
         handshake(&mut session);
