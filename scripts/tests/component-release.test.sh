@@ -3,8 +3,9 @@
 #
 # No Rust build, no network, no R2 access. Covers the release-matrix gate
 # (including "every bitty-component.toml repo publishes at least one
-# supported target"), manifest regeneration, and the catalog.v1 row fragment
-# with its digest/archive verification.
+# supported target"), manifest regeneration, the catalog.v1 row fragment
+# with its digest/archive verification, the generated per-target digest
+# record, and the executable mode/magic gate.
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -100,6 +101,21 @@ EOF
 	printf '%s\n' "$dir"
 }
 
+# write_fake_executable <path> <target> — a plausible native payload so the
+# verifier's executable-magic gate sees the platform it expects. The bytes
+# are not executed; fixture tests never spawn them.
+write_fake_executable() {
+	local path="$1"
+	local target="$2"
+	case "$target" in
+	*-linux-*) printf '\177ELF\002\001\001\000fixture\n' >"$path" ;;
+	*-apple-*) printf '\317\372\355\376fixture\n' >"$path" ;;
+	*-windows-*) printf 'MZfixture\n' >"$path" ;;
+	*) fail "no fake executable magic for target $target" ;;
+	esac
+	chmod 755 "$path"
+}
+
 # make_tarball <repo> <dist> <target> <windows:0|1> <extra:0|1>
 # Stages the fake executable plus a descriptor carrying its digest, then
 # packs the exact two-member archive shape.
@@ -115,8 +131,7 @@ make_tarball() {
 		executable="bitty-demo.exe"
 	fi
 	mkdir -p "$stage" "$dist"
-	printf '#!/bin/sh\necho demo 1.2.3\n' >"$stage/$executable"
-	chmod 755 "$stage/$executable"
+	write_fake_executable "$stage/$executable" "$target"
 	local digest
 	digest="$(sha256 "$stage/$executable" | cut -d' ' -f1)"
 	sed "s/^sha256 = \".*\"$/sha256 = \"$digest\"/" "$repo/bitty-component.toml" >"$stage/bitty-component.toml"
@@ -316,6 +331,53 @@ pass "catalog rows are keyed by target and match SHA256SUMS"
 "$SCRIPT" verify --root "$repo" --dist "$dist" >/dev/null || fail "full-matrix verify failed"
 pass "full-matrix verify accepts the complete supported set"
 
+# --- 4a. release digest record (root descriptor keeps its placeholder) ---
+record_dir="$TMP_BASE/release"
+record_file="$record_dir/component-digests.toml"
+"$SCRIPT" record --root "$repo" --dist "$dist" --output "$record_file" >/dev/null ||
+	fail "release digest record generation failed"
+grep -Fx 'schema = 1' "$record_file" >/dev/null || fail "record schema drifted"
+grep -Fx 'name = "demo"' "$record_file" >/dev/null || fail "record name drifted"
+grep -Fx 'version = "1.2.3"' "$record_file" >/dev/null || fail "record version drifted"
+grep -Fx 'protocol = [1, 1]' "$record_file" >/dev/null || fail "record protocol drifted"
+[[ "$(grep -c '^\[\[target\]\]$' "$record_file")" == "2" ]] ||
+	fail "record does not cover both supported targets"
+linux_tarball_digest="$(cd "$dist" && sha256 x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)"
+grep -Fx "tarball_sha256 = \"$linux_tarball_digest\"" "$record_file" >/dev/null ||
+	fail "record does not carry the Linux tarball digest"
+grep -Fx 'triple = "x86_64-pc-windows-msvc"' "$record_file" >/dev/null ||
+	fail "record is missing the Windows target"
+"$SCRIPT" verify --root "$repo" --dist "$dist" --record "$record_file" >/dev/null ||
+	fail "verify rejected the matching release digest record"
+pass "release digest record covers every target and verifies"
+
+expect_failure "record written inside dist" \
+	"$SCRIPT" record --root "$repo" --dist "$dist" --output "$dist/component-digests.toml"
+
+tampered_record="$TMP_BASE/release/tampered.toml"
+awk '
+	BEGIN { done = 0 }
+	!done && /^tarball_sha256 = / {
+		print "tarball_sha256 = \"0000000000000000000000000000000000000000000000000000000000000000\""
+		done = 1
+		next
+	}
+	{ print }
+' "$record_file" >"$tampered_record"
+expect_failure "record with a drifted digest" \
+	"$SCRIPT" verify --root "$repo" --dist "$dist" --record "$tampered_record"
+
+missing_record_target="$TMP_BASE/release/missing-target.toml"
+sed 's/^triple = "x86_64-pc-windows-msvc"$/triple = "aarch64-pc-windows-msvc"/' \
+	"$record_file" >"$missing_record_target"
+expect_failure "record missing a supported target" \
+	"$SCRIPT" verify --root "$repo" --dist "$dist" --record "$missing_record_target"
+
+wrong_record_name="$TMP_BASE/release/wrong-name.toml"
+sed 's/^name = "demo"$/name = "other"/' "$record_file" >"$wrong_record_name"
+expect_failure "record with the wrong component name" \
+	"$SCRIPT" verify --root "$repo" --dist "$dist" --record "$wrong_record_name"
+
 # --- 4b. the packer normalizes Git-Bash/MSYS binary-mode checksum output ---
 # Git-Bash/MSYS sha256sum defaults to binary mode and prints "<hex> *<name>".
 # Shadow sha256sum with a shim that reproduces that marker, then require the
@@ -339,8 +401,7 @@ writer_repo="$(new_repo writer-repo)"
 writer_dist="$TMP_BASE/writer-dist"
 writer_stage="$TMP_BASE/writer-stage"
 mkdir -p "$writer_dist" "$writer_stage"
-printf '#!/bin/sh\necho demo 1.2.3\n' >"$writer_stage/bitty-demo"
-chmod 755 "$writer_stage/bitty-demo"
+write_fake_executable "$writer_stage/bitty-demo" x86_64-unknown-linux-gnu
 digest="$(sha256 "$writer_stage/bitty-demo" | cut -d' ' -f1)"
 cat >"$writer_stage/bitty-component.toml" <<EOF
 [component]
@@ -363,6 +424,39 @@ grep -Eq '^[0-9a-f]{64}  x86_64-unknown-linux-gnu\.tar\.gz$' \
 "$SCRIPT" catalog --root "$writer_repo" --dist "$writer_dist" >/dev/null ||
 	fail "catalog rejected the writer's canonical checksum lines"
 pass "make-component-dist normalizes binary-mode checksum markers"
+
+# --- 4c. a target's payload must be a plausible native executable ---
+# A tarball named for Linux must not carry a PE payload, and a Linux
+# executable must keep its execute bit. Both are checked before cataloging.
+bad_magic="$TMP_BASE/bad-magic"
+bad_magic_stage="$TMP_BASE/bad-magic-stage"
+mkdir -p "$bad_magic" "$bad_magic_stage"
+cp "$dist"/x86_64-pc-windows-msvc.tar.gz* "$bad_magic/"
+printf 'MZnot-a-linux-executable\n' >"$bad_magic_stage/bitty-demo"
+chmod 755 "$bad_magic_stage/bitty-demo"
+digest="$(sha256 "$bad_magic_stage/bitty-demo" | cut -d' ' -f1)"
+sed "s/^sha256 = \".*\"$/sha256 = \"$digest\"/" \
+	"$repo/bitty-component.toml" >"$bad_magic_stage/bitty-component.toml"
+tar -czf "$bad_magic/x86_64-unknown-linux-gnu.tar.gz" \
+	-C "$bad_magic_stage" bitty-component.toml bitty-demo
+"$SCRIPT" manifest --root "$repo" --dist "$bad_magic" >/dev/null
+expect_failure "Linux artifact carrying a PE payload" \
+	"$SCRIPT" catalog --root "$repo" --dist "$bad_magic"
+
+not_executable="$TMP_BASE/not-executable"
+not_executable_stage="$TMP_BASE/not-executable-stage"
+mkdir -p "$not_executable" "$not_executable_stage"
+cp "$dist"/x86_64-pc-windows-msvc.tar.gz* "$not_executable/"
+write_fake_executable "$not_executable_stage/bitty-demo" x86_64-unknown-linux-gnu
+chmod 644 "$not_executable_stage/bitty-demo"
+digest="$(sha256 "$not_executable_stage/bitty-demo" | cut -d' ' -f1)"
+sed "s/^sha256 = \".*\"$/sha256 = \"$digest\"/" \
+	"$repo/bitty-component.toml" >"$not_executable_stage/bitty-component.toml"
+tar -czf "$not_executable/x86_64-unknown-linux-gnu.tar.gz" \
+	-C "$not_executable_stage" bitty-component.toml bitty-demo
+"$SCRIPT" manifest --root "$repo" --dist "$not_executable" >/dev/null
+expect_failure "Linux artifact without an execute bit" \
+	"$SCRIPT" catalog --root "$repo" --dist "$not_executable"
 
 # --- 5. unsupported or unverified bytes never reach the catalog ---
 partial="$TMP_BASE/partial"
@@ -410,8 +504,7 @@ expect_failure "missing per-target sidecar" \
 stale_descriptor="$TMP_BASE/stale-descriptor"
 stage="$TMP_BASE/stale-stage"
 mkdir -p "$stale_descriptor" "$stage"
-printf '#!/bin/sh\nexit 0\n' >"$stage/bitty-demo"
-chmod 755 "$stage/bitty-demo"
+write_fake_executable "$stage/bitty-demo" x86_64-unknown-linux-gnu
 digest="$(sha256 "$stage/bitty-demo" | cut -d' ' -f1)"
 cat >"$stage/bitty-component.toml" <<EOF
 [component]
@@ -429,8 +522,7 @@ expect_failure "stale descriptor version inside the archive" \
 bad_digest="$TMP_BASE/bad-digest"
 stage="$TMP_BASE/bad-digest-stage"
 mkdir -p "$bad_digest" "$stage"
-printf '#!/bin/sh\nexit 0\n' >"$stage/bitty-demo"
-chmod 755 "$stage/bitty-demo"
+write_fake_executable "$stage/bitty-demo" x86_64-unknown-linux-gnu
 sed 's/^sha256 = ".*"$/sha256 = "1111111111111111111111111111111111111111111111111111111111111111"/' \
 	"$repo/bitty-component.toml" >"$stage/bitty-component.toml"
 tar -czf "$bad_digest/x86_64-unknown-linux-gnu.tar.gz" -C "$stage" bitty-component.toml bitty-demo

@@ -53,6 +53,7 @@ check:
     just component-test
     just component-release-check
     just component-release-test
+    just component-smoke-test
 
 workflows:
     actionlint
@@ -86,9 +87,23 @@ component-test:
 component-release-check:
     ./scripts/component-release.sh check
 
-# Fixture tests for the release matrix, manifest, and catalog.v1 rows.
+# Fixture tests for the release matrix, manifest, catalog.v1 rows, and the
+# generated per-target digest record.
 component-release-test:
     ./scripts/tests/component-release.test.sh
+
+# Fixture tests for the packaged-binary protocol smoke (no Rust build).
+component-smoke-test:
+    ./scripts/tests/component-smoke.test.sh
+
+# Protocol smoke against one packaged/built executable: Hello/DecodeRequest ->
+# HelloAck/DecodeResponse and a clean Shutdown.
+component-smoke binary:
+    ./scripts/component-release.sh smoke --binary {{binary}}
+
+# Write the per-target release digest record from a complete verified dist.
+component-release-record dist out="release/component-digests.toml":
+    ./scripts/component-release.sh record --dist {{dist}} --output {{out}}
 
 # Print the CDN URLs for this component version (pure mapping, no network).
 component-url target:

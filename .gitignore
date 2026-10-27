@@ -6,6 +6,7 @@
 recording/
 node_modules/
 dist/
+release/
 coverage/
 site/
 .trash/

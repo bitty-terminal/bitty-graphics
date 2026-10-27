@@ -14,6 +14,11 @@
 # The gate `scripts/component-release.sh check` fails when no target is
 # supported, when a supported target lacks a runner, when an unsupported
 # target lacks a reason, or when a triple is duplicated or unknown.
+#
+# This matrix deliberately carries no digests: it is the input, not the
+# release output. `scripts/component-release.sh record` writes the per-target
+# tarball/executable digests to release/component-digests.toml after the
+# artifacts are verified, and `verify --record` requires an exact match.
 
 schema = 1
 
