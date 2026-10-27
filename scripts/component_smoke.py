@@ -49,6 +49,12 @@ HELLO_CAPABILITY_GRANTED = 0x02
 PIXEL_FORMAT_RGBA8 = 0x01
 FORMAT_RGBA32 = 32
 
+# Mirrors MAX_RESPONSE_FRAME_BYTES in src/component/protocol.rs (64 MiB
+# bitmap plus the fixed response fields). A malformed child cannot make the
+# smoke allocate more than one bounded frame.
+MAX_RESPONSE_FRAME_BYTES = 64 * 1024 * 1024 + 1024
+FRAME_QUEUE_DEPTH = 8
+
 REQUEST_ID = 1
 DECODE_TIMEOUT_MS = 5_000
 RGBA_PIXEL = bytes([0x11, 0x22, 0x33, 0x44])
@@ -238,7 +244,9 @@ class Component:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
-        self.frames: queue.Queue[tuple[str, object]] = queue.Queue()
+        self.frames: queue.Queue[tuple[str, object]] = queue.Queue(
+            maxsize=FRAME_QUEUE_DEPTH
+        )
         self.reader = threading.Thread(
             target=self._read_frames, name="component-smoke-reader", daemon=True
         )
@@ -257,6 +265,17 @@ class Component:
                     self.frames.put(("error", "truncated frame header"))
                     return
                 length = struct.unpack(">I", header)[0]
+                if length == 0 or length > MAX_RESPONSE_FRAME_BYTES:
+                    self.frames.put(
+                        (
+                            "error",
+                            (
+                                f"component frame length {length} outside "
+                                f"1..{MAX_RESPONSE_FRAME_BYTES}"
+                            ),
+                        )
+                    )
+                    return
                 payload = read_exact(stream, length)
                 if len(payload) != length:
                     self.frames.put(("error", "truncated frame payload"))
@@ -333,7 +352,7 @@ def run(binary: Path, root: Path, timeout: float) -> None:
         parse_decode_response(component.recv())
         component.send(encode_shutdown())
         ack = component.recv()
-        if not ack or ack[0] != TAG_SHUTDOWN_ACK:
+        if ack != bytes([TAG_SHUTDOWN_ACK]):
             raise SmokeFailure(f"expected ShutdownAck, got {describe(ack)}")
         try:
             code = component.child.wait(timeout=timeout)

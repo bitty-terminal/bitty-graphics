@@ -186,11 +186,10 @@ scripts/component-release.sh manifest --dist dist
 scripts/component-release.sh catalog --dist dist --output catalog/catalog.v1
 
 # Native-host protocol smoke against the unpacked executable
-scripts/component-release.sh smoke \
-  --binary dist/unpacked/bitty-graphics
+scripts/component-release.sh smoke --binary path/to/unpacked/bitty-graphics
 
-# Release gate: exactly the supported matrix, every archive verified, plus
-# the generated per-target digest record
+# Aggregate-only: collect every supported target's tarball into dist first
+# (native builds on their own runners), then record and verify the full matrix.
 scripts/component-release.sh record --dist dist --output release/component-digests.toml
 scripts/component-release.sh verify \
   --dist dist --record release/component-digests.toml

@@ -99,11 +99,11 @@ component-smoke-test:
 # Protocol smoke against one packaged/built executable: Hello/DecodeRequest ->
 # HelloAck/DecodeResponse and a clean Shutdown.
 component-smoke binary:
-    ./scripts/component-release.sh smoke --binary {{binary}}
+    ./scripts/component-release.sh smoke --binary "{{binary}}"
 
 # Write the per-target release digest record from a complete verified dist.
 component-release-record dist out="release/component-digests.toml":
-    ./scripts/component-release.sh record --dist {{dist}} --output {{out}}
+    ./scripts/component-release.sh record --dist "{{dist}}" --output "{{out}}"
 
 # Print the CDN URLs for this component version (pure mapping, no network).
 component-url target:

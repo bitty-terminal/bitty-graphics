@@ -87,6 +87,12 @@ if MODE == "hang":
     time.sleep(60)
     raise SystemExit(0)
 
+if MODE == "oversize-frame":
+    sys.stdout.buffer.write(struct.pack(">I", 64 * 1024 * 1024 + 1025))
+    sys.stdout.buffer.flush()
+    time.sleep(60)
+    raise SystemExit(0)
+
 hello = frame(sys.stdin.buffer)
 if not hello or hello[0] != 0x01:
     raise SystemExit(3)
@@ -131,7 +137,7 @@ send(
 shutdown = frame(sys.stdin.buffer)
 if not shutdown or shutdown[0] != 0x3F:
     raise SystemExit(3)
-send(b"\x3e")
+send(b"\x3e\x00" if MODE == "bad-shutdown" else b"\x3e")
 raise SystemExit(0)
 EOF
 chmod 755 "$fake"
@@ -157,6 +163,14 @@ expect_failure "HelloAck component mismatch" \
 expect_failure "component that never replies" \
 	env FAKE_MODE=hang "$ROOT/scripts/component-release.sh" smoke \
 	--binary "$fake" --root "$fixture" --timeout 1
+
+expect_failure "oversized response frame" \
+	env FAKE_MODE=oversize-frame "$ROOT/scripts/component-release.sh" smoke \
+	--binary "$fake" --root "$fixture" --timeout 3
+
+expect_failure "ShutdownAck with trailing bytes" \
+	env FAKE_MODE=bad-shutdown "$ROOT/scripts/component-release.sh" smoke \
+	--binary "$fake" --root "$fixture" --timeout 3
 
 expect_failure "missing binary" \
 	"$ROOT/scripts/component-release.sh" smoke \

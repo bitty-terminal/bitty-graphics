@@ -439,6 +439,15 @@ def inspect_archive(path: Path, component: Component, target: Target) -> Archive
                     f"{path} descriptor executable {embedded.executable} differs from "
                     f"{component.executable}"
                 )
+            if (embedded.protocol_min, embedded.protocol_max) != (
+                component.protocol_min,
+                component.protocol_max,
+            ):
+                fail(
+                    f"{path} descriptor protocol "
+                    f"[{embedded.protocol_min}, {embedded.protocol_max}] differs from "
+                    f"the canonical [{component.protocol_min}, {component.protocol_max}]"
+                )
 
             executable_member = archive.getmember(expected_executable)
             executable_handle = archive.extractfile(executable_member)

@@ -458,6 +458,21 @@ tar -czf "$not_executable/x86_64-unknown-linux-gnu.tar.gz" \
 expect_failure "Linux artifact without an execute bit" \
 	"$SCRIPT" catalog --root "$repo" --dist "$not_executable"
 
+protocol_drift="$TMP_BASE/protocol-drift"
+protocol_drift_stage="$TMP_BASE/protocol-drift-stage"
+mkdir -p "$protocol_drift" "$protocol_drift_stage"
+cp "$dist"/x86_64-pc-windows-msvc.tar.gz* "$protocol_drift/"
+write_fake_executable "$protocol_drift_stage/bitty-demo" x86_64-unknown-linux-gnu
+digest="$(sha256 "$protocol_drift_stage/bitty-demo" | cut -d' ' -f1)"
+sed -e 's/^protocol = \[1, 1\]$/protocol = [1, 2]/' \
+	-e "s/^sha256 = \".*\"$/sha256 = \"$digest\"/" \
+	"$repo/bitty-component.toml" >"$protocol_drift_stage/bitty-component.toml"
+tar -czf "$protocol_drift/x86_64-unknown-linux-gnu.tar.gz" \
+	-C "$protocol_drift_stage" bitty-component.toml bitty-demo
+"$SCRIPT" manifest --root "$repo" --dist "$protocol_drift" >/dev/null
+expect_failure "archive descriptor with drifted protocol bounds" \
+	"$SCRIPT" catalog --root "$repo" --dist "$protocol_drift"
+
 # --- 5. unsupported or unverified bytes never reach the catalog ---
 partial="$TMP_BASE/partial"
 mkdir -p "$partial"
