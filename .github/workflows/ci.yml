@@ -119,6 +119,9 @@ jobs:
         run: |
           set -euo pipefail
           stage="${RUNNER_TEMP}/graphics-component"
+          if command -v cygpath >/dev/null 2>&1; then
+            stage="$(cygpath -u "$RUNNER_TEMP")/graphics-component"
+          fi
           rm -rf "$stage"
           mkdir -p "$stage"
           tar -xzf "dist/$TARGET.tar.gz" -C "$stage"
@@ -127,7 +130,11 @@ jobs:
           *-windows-*) binary="$binary.exe" ;;
           esac
           chmod 755 "$binary" 2>/dev/null || true
-          scripts/component-release.sh smoke --binary "$binary" --timeout 30
+          smoke_binary="$binary"
+          if command -v cygpath >/dev/null 2>&1; then
+            smoke_binary="$(cygpath -w "$binary")"
+          fi
+          scripts/component-release.sh smoke --binary "$smoke_binary" --timeout 30
       - name: Emit the catalog row for this target
         env:
           TARGET: ${{ matrix.target }}
