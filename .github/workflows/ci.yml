@@ -59,7 +59,8 @@ jobs:
           version="$(awk -F'"' '$1 ~ /^[[:space:]]*version[[:space:]]*=/ { print $2; exit }' bitty-component.toml)"
           while IFS= read -r target; do
             expected="https://cdn.bitty.run/extensions/${name}/${version}/${target}.tar.gz"
-            actual="$(scripts/make-component-dist.sh --print-url --name "$name" --version "$version" --target "$target" | head -n 1)"
+            mapping="$(scripts/make-component-dist.sh --print-url --name "$name" --version "$version" --target "$target")"
+            actual="${mapping%%$'\n'*}"
             test "$actual" = "$expected" || {
               echo "URL mapping drifted for $target: $actual" >&2
               exit 1
