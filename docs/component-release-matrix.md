@@ -22,18 +22,19 @@ an explicit "not installable yet", never a silent fallback to another target.
 
 ## Supported targets
 
-| Target triple               | OS      | Arch    | Native CI runner   | Evidence                                    |
-| --------------------------- | ------- | ------- | ------------------ | ------------------------------------------- |
-| `x86_64-unknown-linux-gnu`  | linux   | x86_64  | `ubuntu-24.04`     | check, test, clippy, run, pack, catalog row |
-| `aarch64-unknown-linux-gnu` | linux   | aarch64 | `ubuntu-24.04-arm` | check, test, clippy, run, pack, catalog row |
-| `aarch64-apple-darwin`      | macos   | aarch64 | `macos-15`         | check, test, clippy, run, pack, catalog row |
-| `x86_64-apple-darwin`       | macos   | x86_64  | `macos-15-intel`   | check, test, clippy, run, pack, catalog row |
-| `x86_64-pc-windows-msvc`    | windows | x86_64  | `windows-2025`     | check, test, clippy, run, pack, catalog row |
+| Target triple               | OS      | Arch    | Native CI runner   | Evidence                                      |
+| --------------------------- | ------- | ------- | ------------------ | --------------------------------------------- |
+| `x86_64-unknown-linux-gnu`  | linux   | x86_64  | `ubuntu-24.04`     | check, test, clippy, smoke, pack, catalog row |
+| `aarch64-unknown-linux-gnu` | linux   | aarch64 | `ubuntu-24.04-arm` | check, test, clippy, smoke, pack, catalog row |
+| `aarch64-apple-darwin`      | macos   | aarch64 | `macos-15`         | check, test, clippy, smoke, pack, catalog row |
+| `x86_64-apple-darwin`       | macos   | x86_64  | `macos-15-intel`   | check, test, clippy, smoke, pack, catalog row |
+| `x86_64-pc-windows-msvc`    | windows | x86_64  | `windows-2025`     | check, test, clippy, smoke, pack, catalog row |
 
 Every row has green PR CI evidence on its native GitHub-hosted runner:
 `cargo check` and `cargo test` prove compilation and behavior, clippy denies
-warnings on that platform, the tarball is packed, and the packaged binary is
-executed (`--version`) before its catalog row is emitted.
+warnings on that platform, the packed tarball is unpacked and the packaged
+binary passes the protocol smoke before its catalog row is emitted, and only
+then is the artifact uploaded.
 
 ## Documented exclusions
 
@@ -60,6 +61,35 @@ Each tarball contains exactly two members at the archive root: the logical
 descriptor `bitty-component.toml` (with the target binary digest) and the
 executable `bitty-graphics` (`bitty-graphics.exe` on Windows targets).
 
+The canonical root `bitty-component.toml` keeps its zero-digest placeholder;
+`scripts/pack-component.sh` renders a per-target copy whose `sha256` is that
+target executable's digest. The placeholder rule is unchanged: the packer
+replaces only that line, and install-time verification refuses any descriptor
+whose `sha256` does not match the executable, so the zero sentinel can never
+be installed.
+The release also writes `release/component-digests.toml`, a generated record
+with one row per supported target:
+
+```toml
+schema = 1
+name = "graphics"
+version = "X.Y.Z"
+protocol = [1, 1]
+
+[[target]]
+triple = "x86_64-unknown-linux-gnu"
+tarball = "x86_64-unknown-linux-gnu.tar.gz"
+tarball_sha256 = "<tarball sha256>"
+executable = "bitty-graphics"
+executable_sha256 = "<executable sha256>"
+```
+
+`scripts/component-release.sh verify --record release/component-digests.toml`
+requires the record to name exactly the supported matrix and every digest to
+match the verified artifacts. The record is a release-candidate artifact, not
+an R2 object; it is written outside `dist/` so the publisher's exact file-set
+gate stays intact.
+
 `scripts/component-release.sh catalog` emits the registry fragment:
 
 ```text
@@ -78,6 +108,42 @@ components, so a single-component fragment would clobber other components'
 rows. The future catalog merge job owns that key; until it exists, installs use
 the pinned-version fallback described in the Core packaging contract.
 
+## Protocol smoke
+
+`scripts/component_smoke.py` (through `scripts/component-release.sh smoke`) is
+the native-host check that the artifact actually runs, not just that it has a
+plausible name. It spawns the unpacked executable, verifies `--version`, then
+speaks protocol v1 over stdin/stdout:
+
+1. `Hello` -> `HelloAck` with protocol 1, the descriptor component/version,
+   and a non-empty capability set.
+2. One raw RGBA `DecodeRequest` (1x1) -> `DecodeResponse` with request id 1,
+   RGBA8 format, stride 4, and the exact input pixels.
+3. `Shutdown` -> `ShutdownAck`, process exit 0.
+
+Every native CI and release matrix leg runs this against the extracted
+tarball before uploading it. A component that starts but cannot complete the
+handshake or one decode fails the leg, so no artifact is advertised without
+native protocol evidence. `just component-smoke path/to/bitty-graphics` runs
+the same check locally.
+
+## Verification gate
+
+`scripts/component-release.sh verify` fails when:
+
+- a supported target has no tarball, no sidecar, or no `SHA256SUMS` entry;
+- an unsupported target appears in the manifest or dist;
+- the archive is not exactly the descriptor plus the expected executable;
+- the embedded descriptor identity/version/protocol or executable digest
+  drifts;
+- the executable is empty, lacks an execute bit (non-Windows targets), or its
+  first bytes are not the expected ELF/Mach-O/PE magic for that target;
+- a tarball digest changes between manifest and verification.
+
+`--record` adds the per-target digest-record check. The tag path runs the same
+gate after every matrix leg, so a partial or unverified set can never reach
+R2.
+
 ## CI evidence
 
 `.github/workflows/ci.yml`:
@@ -87,20 +153,21 @@ the pinned-version fallback described in the Core packaging contract.
   supported target, then emits the matrix.
 - `component` runs once per supported target on its native runner: `cargo
 check --workspace --all-targets`, `cargo test --workspace`, clippy with
-  `-D warnings`, packaging, native `--version` execution, and the per-target
-  catalog row.
+  `-D warnings`, packaging, protocol smoke against the packed executable, and
+  the per-target catalog row.
 - `component-aggregate` merges the target artifacts, regenerates
-  `SHA256SUMS`, runs the full-matrix verifier (all supported targets present,
-  every archive member and digest checked), and prints the catalog fragment.
+  `SHA256SUMS`, writes and verifies `release/component-digests.toml`, runs
+  the full-matrix verifier (all supported targets present, every archive
+  member, digest, mode, and magic checked), and prints the catalog fragment.
 
 `.github/workflows/component-release.yml` repeats the per-target packaging on
-the tag path: `cargo check`, `cargo test`, packaging, native `--version`
-execution, and the per-target catalog row. The tag `package` job does **not**
-run clippy; clippy runs in the Linux `verify` job (`just product`, which also
-runs `cargo fmt --check` and `cargo test`) and in PR CI. Aggregation and
-publish run only after every matrix leg succeeded, so a partial or unverified
-target set can never reach R2. The publish job uploads payloads only; the
-catalog fragment is not uploaded (see above). Local packaging never uploads.
+the tag path: `cargo check`, `cargo test`, packaging, protocol smoke against
+the packed executable, and the per-target catalog row. The tag `package` job
+does **not** run clippy; clippy runs in the Linux `verify` job (`just product`,
+which also runs `cargo fmt --check` and `cargo test`) and in PR CI. Aggregation
+and publish run only after every matrix leg succeeded. The publish job uploads
+payloads only; the catalog fragment and digest record are not uploaded (see
+above). Local packaging never uploads.
 
 ## Local commands
 
@@ -118,8 +185,14 @@ scripts/package-component.sh --version X.Y.Z \
 scripts/component-release.sh manifest --dist dist
 scripts/component-release.sh catalog --dist dist --output catalog/catalog.v1
 
-# Release gate: exactly the supported matrix, every archive verified
-scripts/component-release.sh verify --dist dist
+# Native-host protocol smoke against the unpacked executable
+scripts/component-release.sh smoke --binary path/to/unpacked/bitty-graphics
+
+# Aggregate-only: collect every supported target's tarball into dist first
+# (native builds on their own runners), then record and verify the full matrix.
+scripts/component-release.sh record --dist dist --output release/component-digests.toml
+scripts/component-release.sh verify \
+  --dist dist --record release/component-digests.toml
 ```
 
 The tooling is Python 3.11+ (`tomllib`) behind `scripts/component-release.sh`,
@@ -135,7 +208,10 @@ name comes from `bitty-component.toml`, the version from that descriptor plus
   already owned by `scripts/make-component-dist.sh`.
 - Unsupported targets are refused before any manifest or catalog output is
   written; the verifier also refuses wrapper directories, extra members,
-  symlinks, stale descriptor versions, and digest mismatches.
+  symlinks, stale descriptor versions, digest mismatches, wrong-platform
+  executable magic, and non-executable Linux/macOS members.
+- The protocol smoke only spawns the artifact it was given, never a shell or
+  an interpreter, and stops that child on any failure.
 - Publication remains tag-only and read-back verified in
   `scripts/publish-component.sh`; this change does not tag, upload, or mutate
   R2 state.
