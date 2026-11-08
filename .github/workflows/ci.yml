@@ -128,9 +128,11 @@ jobs:
           tar -xzf "dist/$TARGET.tar.gz" -C "$stage"
           binary="$stage/bitty-graphics"
           case "$TARGET" in
-          *-windows-*) binary="$binary.exe" ;;
+          *-windows-*)
+            binary="$binary.exe"
+            chmod 755 "$binary" 2>/dev/null || true
+            ;;
           esac
-          chmod 755 "$binary" 2>/dev/null || true
           smoke_binary="$binary"
           if command -v cygpath >/dev/null 2>&1; then
             smoke_binary="$(cygpath -w "$binary")"
@@ -172,9 +174,12 @@ jobs:
           path: dist
       - name: Regenerate the aggregate SHA256SUMS
         run: scripts/component-release.sh manifest --dist dist
-      - name: Emit the per-target digest record
+      - name: Emit the per-target digest record (generator/verifier round-trip)
         run: scripts/component-release.sh record --dist dist --output release/component-digests.toml
-      - name: Verify the complete supported matrix, descriptor chain, and digest record
+      - name: Verify the complete supported matrix, descriptor chain, and digest-record round-trip
+        # Note: running `record` then `verify --record` against the same `dist`
+        # proves generator/verifier consistency for the release record, not an
+        # independent digest pin.
         run: |
           scripts/component-release.sh verify \
             --dist dist \

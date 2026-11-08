@@ -164,8 +164,6 @@ class ArchiveInfo:
     tarball_sha256: str
     executable: str
     executable_sha256: str
-    executable_size: int
-    executable_mode: int
 
 
 def fail(message: str) -> NoReturn:
@@ -481,8 +479,6 @@ def inspect_archive(path: Path, component: Component, target: Target) -> Archive
         tarball_sha256=sha256_file(path),
         executable=expected_executable,
         executable_sha256=digest,
-        executable_size=size,
-        executable_mode=executable_member.mode,
     )
 
 

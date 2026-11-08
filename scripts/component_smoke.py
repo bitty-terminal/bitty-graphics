@@ -32,7 +32,10 @@ import threading
 import time
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - guarded by the shell wrapper
+    sys.exit("component-smoke: ERROR: Python 3.11+ with tomllib is required")
 
 DESCRIPTOR_FILE = "bitty-component.toml"
 

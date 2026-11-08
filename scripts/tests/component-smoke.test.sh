@@ -137,7 +137,11 @@ send(
 shutdown = frame(sys.stdin.buffer)
 if not shutdown or shutdown[0] != 0x3F:
     raise SystemExit(3)
+if MODE == "no-shutdown-ack":
+    raise SystemExit(0)
 send(b"\x3e\x00" if MODE == "bad-shutdown" else b"\x3e")
+if MODE == "hang-after-shutdown-ack":
+    time.sleep(60)
 raise SystemExit(0)
 EOF
 chmod 755 "$fake"
@@ -171,6 +175,14 @@ expect_failure "oversized response frame" \
 expect_failure "ShutdownAck with trailing bytes" \
 	env FAKE_MODE=bad-shutdown "$ROOT/scripts/component-release.sh" smoke \
 	--binary "$fake" --root "$fixture" --timeout 3
+
+expect_failure "no ShutdownAck after handshake" \
+	env FAKE_MODE=no-shutdown-ack "$ROOT/scripts/component-release.sh" smoke \
+	--binary "$fake" --root "$fixture" --timeout 3
+
+expect_failure "ShutdownAck then never exits" \
+	env FAKE_MODE=hang-after-shutdown-ack "$ROOT/scripts/component-release.sh" smoke \
+	--binary "$fake" --root "$fixture" --timeout 1
 
 expect_failure "missing binary" \
 	"$ROOT/scripts/component-release.sh" smoke \
