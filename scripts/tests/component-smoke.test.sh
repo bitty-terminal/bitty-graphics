@@ -137,7 +137,14 @@ send(
 shutdown = frame(sys.stdin.buffer)
 if not shutdown or shutdown[0] != 0x3F:
     raise SystemExit(3)
+if MODE == "no-shutdown-ack":
+    raise SystemExit(0)
+if MODE == "hang-before-shutdown-ack":
+    time.sleep(60)
+    raise SystemExit(0)
 send(b"\x3e\x00" if MODE == "bad-shutdown" else b"\x3e")
+if MODE == "hang-after-shutdown-ack":
+    time.sleep(60)
 raise SystemExit(0)
 EOF
 chmod 755 "$fake"
@@ -171,6 +178,22 @@ expect_failure "oversized response frame" \
 expect_failure "ShutdownAck with trailing bytes" \
 	env FAKE_MODE=bad-shutdown "$ROOT/scripts/component-release.sh" smoke \
 	--binary "$fake" --root "$fixture" --timeout 3
+
+expect_failure "no ShutdownAck after handshake" \
+	env FAKE_MODE=no-shutdown-ack "$ROOT/scripts/component-release.sh" smoke \
+	--binary "$fake" --root "$fixture" --timeout 3
+
+expect_failure "ShutdownAck receive timeout while stdout stays open" \
+	env FAKE_MODE=hang-before-shutdown-ack "$ROOT/scripts/component-release.sh" smoke \
+	--binary "$fake" --root "$fixture" --timeout 1
+grep -F 'component-smoke: ERROR: component produced no frame within 1s' "$TMP_BASE/last-output" >/dev/null ||
+	fail "hang-before-shutdown-ack did not report the expected receive timeout"
+
+expect_failure "ShutdownAck then never exits" \
+	env FAKE_MODE=hang-after-shutdown-ack "$ROOT/scripts/component-release.sh" smoke \
+	--binary "$fake" --root "$fixture" --timeout 1
+grep -F 'component-smoke: ERROR: component did not exit after ShutdownAck' "$TMP_BASE/last-output" >/dev/null ||
+	fail "shutdown test did not report the expected timeout"
 
 expect_failure "missing binary" \
 	"$ROOT/scripts/component-release.sh" smoke \

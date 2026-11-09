@@ -367,9 +367,17 @@ awk '
 expect_failure "record with a drifted digest" \
 	"$SCRIPT" verify --root "$repo" --dist "$dist" --record "$tampered_record"
 
-missing_record_target="$TMP_BASE/release/missing-target.toml"
+substituted_record_target="$TMP_BASE/release/substituted-target.toml"
 sed 's/^triple = "x86_64-pc-windows-msvc"$/triple = "aarch64-pc-windows-msvc"/' \
-	"$record_file" >"$missing_record_target"
+	"$record_file" >"$substituted_record_target"
+expect_failure "record substituting an unsupported target" \
+	"$SCRIPT" verify --root "$repo" --dist "$dist" --record "$substituted_record_target"
+
+missing_record_target="$TMP_BASE/release/missing-target.toml"
+awk '
+	/^\[\[target\]\]$/ { count++ }
+	count < 2 { print }
+' "$record_file" >"$missing_record_target"
 expect_failure "record missing a supported target" \
 	"$SCRIPT" verify --root "$repo" --dist "$dist" --record "$missing_record_target"
 
@@ -388,7 +396,7 @@ mkdir -p "$msys_shim"
 cat >"$msys_shim/sha256sum" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if command -p sha256sum >/dev/null 2>&1; then
+if command -p -v sha256sum >/dev/null 2>&1; then
 	digest="$(command -p sha256sum "$@" | cut -d' ' -f1)"
 else
 	digest="$(command -p shasum -a 256 "$@" | cut -d' ' -f1)"
@@ -500,6 +508,13 @@ tar -czf "$wrapped/x86_64-unknown-linux-gnu.tar.gz" -C "$stage" pkg
 "$SCRIPT" manifest --root "$repo" --dist "$wrapped" >/dev/null
 expect_failure "archive with a wrapper directory" \
 	"$SCRIPT" catalog --root "$repo" --dist "$wrapped"
+
+extra_member="$TMP_BASE/extra-member"
+mkdir -p "$extra_member"
+make_tarball "$repo" "$extra_member" x86_64-unknown-linux-gnu 0 1
+"$SCRIPT" manifest --root "$repo" --dist "$extra_member" >/dev/null
+expect_failure "archive with an extra member" \
+	"$SCRIPT" catalog --root "$repo" --dist "$extra_member"
 
 tampered="$TMP_BASE/tampered"
 mkdir -p "$tampered"
